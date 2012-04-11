@@ -1,10 +1,13 @@
 <?php
 
+require_once dirname(__FILE__).'/../misc/Misc.class.php';
+
 /**
  * UTestSkeleton core class
  */
 class Skeleton extends Misc
 {
+
     /**
      * setup defaults configs
      * @uses parent::configure()
@@ -16,7 +19,11 @@ class Skeleton extends Misc
             'php_unit' => array(
                 'classname' => array(
                     'pattern' => '*.php',
-                    'regex' => '/^([\w]+)\.php$/'
+                    'regex' => '/^([\w]+)(\.class)?\.php$/'
+                ),
+                'test' => array(
+                    'dir' => 'Tests',
+                    'dest' => '/Tests'
                 ),
                 'template' => array(
                     'file' => 'php_unit.twig.html'
@@ -27,27 +34,15 @@ class Skeleton extends Misc
                     'pattern' => '*.class.php',
                     'regex' => '/^([\w]+)\.class\.php$/'
                 ),
+                'test' => array(
+                    'dir' => 'test',
+                    'dest' => 'test/unit'
+                ),
                 'template' => array(
                     'file' => 'lime.twig.html'
                 )
             )
         ));
-    }
-
-    /**
-     * valids all parameters are corrects
-     * @return bool
-     * @throws InvalidArgumentException
-     */
-    protected function checkup()
-    {
-        if (!$this->bound('find_class_path')) {
-            throw new Exception(sprintf('Event "%s" has to de defined and must return class path from a classname',
-                'find_class_path'
-            ));
-        }
-
-        return true;
     }
 
     /**
@@ -72,8 +67,6 @@ class Skeleton extends Misc
      */
     public function run($classes)
     {
-        $this->checkup();
-
         $classList = $this->extract($classes);
 
         foreach ($classList as $classname) {
@@ -113,6 +106,18 @@ class Skeleton extends Misc
                     '$1', basename($classFile), 1
                 );
             }
+        }
+        elseif(is_file($dirOrClass)) {
+            $this->trigger('log', 'read-file', sprintf('read "%s" file', $dirOrClass));
+
+            $class = preg_filter(
+                $this->getConfOrEx('classname', 'regex'),
+                '$1', basename($dirOrClass), 1
+            );
+
+            $this->bind('find_class_path', create_function('', sprintf('return "%s";', realpath($dirOrClass))));
+
+            $classes = array($class);
         }
         else {
             if (!class_exists($dirOrClass)) {
@@ -279,36 +284,47 @@ class Skeleton extends Misc
     {
         // find class path in symfony autoload to build same dirs in tests
         $classpath = $this->trigger('find_class_path', $classname);
+        if (!is_file($classpath)) {
+            throw new Exception(sprintf('Class file for "%s" class does not exist, searched at path "%s"',
+                $classname, $classpath
+            ));
+        }
 
         // move backward in file system to find a test dir
         $i = 0;
         $stackdir = array();
 
         do {
-            $localTestDir = dirname($classpath).str_repeat('/..', $i);
+            $localTestDir = realpath(dirname($classpath).str_repeat('/..', $i));
+            $this->trigger('log', 'search in', $localTestDir, 'comment');
 
-            if(is_dir($localTestDir.'/test/')) {
+            if(realpath($localTestDir) == '/') {
+                throw new RuntimeException(sprintf('Any "%s" dir find in "%s" siblings parents directories.',
+                    $this->getConfOrEx('test', 'dir'),
+                    $classpath
+                ));
+            }
+
+            if(is_dir(sprintf('%s/%s/', $localTestDir, $this->getConfOrEx('test', 'dir')))) {
                 $testDir = $localTestDir;
             }
-            elseif($localTestDir == sfConfig::get('sf_root_dir')) {
-                $testDir = sfConfig::get('sf_test_dir');
-            }
             else {
-                array_push($stackdir, preg_filter('#^.+\/([A-Za-z0-9_]+)$#', '$1', dirname($localTestDir)));
+                array_unshift($stackdir, preg_filter('#^.+\/([A-Za-z0-9_]+)$#', '$1', dirname($localTestDir)));
             }
 
             $i++;
         } while(empty($testDir));
 
         $this->treeLevel = 0;
-        $testDir = realpath($testDir).'/test/unit';
+        $baseDir = preg_filter('#^.+\/([A-Za-z0-9_]+)$#', '$1', realpath($testDir));
+        $testDir = realpath($testDir).$this->getConfOrEx('test', 'dest');
+
         foreach ($stackdir as $dir) {
-            if ($dir == 'lib') {
+            if ($dir == 'lib' || $dir == $baseDir) {
                 continue;
             }
 
             $testDir .= '/'.$dir;
-
             if (!is_dir($testDir)) {
                 if (!mkdir($testDir)) {
                     throw new RuntimeException(sprintf('Error while creating a directory at path "%s".',
@@ -328,5 +344,4 @@ class Skeleton extends Misc
 
         return $testPath;
     }
-
 }
