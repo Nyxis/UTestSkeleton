@@ -36,7 +36,7 @@ class Skeleton extends Misc
                 ),
                 'test' => array(
                     'dir' => 'test',
-                    'dest' => 'test/unit'
+                    'dest' => '/test/unit'
                 ),
                 'template' => array(
                     'file' => 'lime.twig.html'
