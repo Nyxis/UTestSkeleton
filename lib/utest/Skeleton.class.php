@@ -7,6 +7,14 @@ require_once dirname(__FILE__).'/../misc/Misc.class.php';
  */
 class Skeleton extends Misc
 {
+    /**  */
+    protected $currentClassName;
+
+    /**  */
+    protected $currentClassNamespace = '';
+
+    /**  */
+    protected $currentTestNamespace = '';
 
     /**
      * setup defaults configs
@@ -101,23 +109,12 @@ class Skeleton extends Misc
 
             $classes = array();
             foreach ($classFileList as $classFile) {
-                $classes[] = preg_filter(
-                    $this->getConfOrEx('classname', 'regex'),
-                    '$1', basename($classFile), 1
-                );
+                $classes[] = $this->getClassName($classFile);
             }
         }
         elseif(is_file($dirOrClass)) {
             $this->trigger('log', 'read-file', sprintf('read "%s" file', $dirOrClass));
-
-            $class = preg_filter(
-                $this->getConfOrEx('classname', 'regex'),
-                '$1', basename($dirOrClass), 1
-            );
-
-            $this->bind('find_class_path', create_function('', sprintf('return "%s";', realpath($dirOrClass))));
-
-            $classes = array($class);
+            $classes = array($this->getClassName($dirOrClass));
         }
         else {
             if (!class_exists($dirOrClass)) {
@@ -129,6 +126,39 @@ class Skeleton extends Misc
 
         return $classes;
     }
+
+    /**
+     * internal mapping for classpath
+     */
+    protected $classmap = array();
+
+    /**
+     * extract classname from classpath
+     * @param string $classpath
+     * @return string $classname
+     */
+    protected function getClassName($classpath)
+    {
+        $this->classname = preg_filter(
+            $this->getConfOrEx('classname', 'regex'),
+            '$1', basename($classpath), 1
+        );
+
+        // parse namespace
+        if (preg_match('/namespace ([a-zA-Z0-9\\\]+)\;/', file_get_contents($classpath), $matches)) {
+            $this->currentClassNamespace = $matches[1];
+            $this->classname = $this->currentClassNamespace.'\\'.$this->classname;
+        }
+
+        $this->classmap[$this->classname] = $classpath;
+        $this->bind('find_class_path', create_function('$classname', sprintf(
+            '$map = %s; return isset($map[$classname]) ? $map[$classname] : "";',
+            var_export($this->classmap, true)
+        )));
+
+        return $this->classname;
+    }
+
 
     /**
      * returns class infos, like comment's tags, classe and method name etc...
@@ -143,7 +173,8 @@ class Skeleton extends Misc
     	$reflectionClass = new ReflectionClass($classname);
 
     	// Set name
-    	$infos['class'] = $reflectionClass->getName();
+        $infos['reflection'] = $reflectionClass;
+    	$infos['class'] = $reflectionClass->getShortName();
         $infos['methods'] = array();
 
         // fixtures
@@ -160,6 +191,10 @@ class Skeleton extends Misc
 
 		$infosMethods = array();
     	foreach ($methods as $reflectionMethod) {
+
+            if($reflectionMethod->getDeclaringClass()->getName() != $classname) {
+                continue;
+            }
 
             $infosMethods = array(
                 'name' => $reflectionMethod->getName(),
@@ -309,7 +344,7 @@ class Skeleton extends Misc
                 $testDir = $localTestDir;
             }
             else {
-                array_unshift($stackdir, preg_filter('#^.+\/([A-Za-z0-9_]+)$#', '$1', dirname($localTestDir)));
+                array_unshift($stackdir, preg_filter('#^.+\/([A-Za-z0-9_]+)$#', '$1', $localTestDir));
             }
 
             $i++;
@@ -339,7 +374,7 @@ class Skeleton extends Misc
         }
 
         $testPath = sprintf('%s/%sTest.gen.php',
-            $testDir, ucfirst($classname)
+            $testDir, ucfirst(preg_filter('#^.+\\\([A-Za-z0-9_]+)$#', '$1', $classname))
         );
 
         return $testPath;
